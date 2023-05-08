@@ -1,3 +1,4 @@
+import json
 from typing import Sequence
 
 import pendulum
@@ -6,6 +7,8 @@ from dagster import (
     AssetMaterialization,
     AssetSelection,
     DagsterInstance,
+    StaticPartitionsDefinition,
+    asset,
     build_asset_reconciliation_sensor,
     build_sensor_context,
     job,
@@ -13,7 +16,9 @@ from dagster import (
     repository,
 )
 from dagster._check import CheckError
-from dagster._core.definitions.asset_graph import AssetGraph
+from dagster._core.definitions.asset_graph import (
+    AssetGraph,
+)
 from dagster._core.definitions.asset_reconciliation_sensor import (
     AutoMaterializeAssetEvaluation,
     build_auto_materialize_asset_evaluations,
@@ -23,7 +28,11 @@ from dagster._core.definitions.time_window_partitions import (
     HourlyPartitionsDefinition,
 )
 
-from .asset_reconciliation_scenario import AssetReconciliationScenario, asset_def
+from .asset_reconciliation_scenario import (
+    AssetReconciliationCursor,
+    AssetReconciliationScenario,
+    asset_def,
+)
 from .scenarios import ASSET_RECONCILIATION_SCENARIOS
 
 
@@ -183,3 +192,43 @@ def test_sensor_fails_on_auto_materialize_policy():
         match=r"build_asset_reconciliation_sensor: Asset '.*' has an AutoMaterializePolicy set",
     ):
         reconciliation_sensor(context)
+
+
+def test_deserialize_asset_reconciliation_cursor_backcompat():
+    partitions_def = StaticPartitionsDefinition(["a", "b", "c"])
+
+    @asset(partitions_def=partitions_def)
+    def asset1():
+        ...
+
+    @asset
+    def asset2():
+        ...
+
+    materialized_or_requested_root_partitions_by_asset_key = {
+        asset1.key: partitions_def.subset_with_partition_keys(["a", "b"])
+    }
+    materialized_or_requested_root_asset_keys = {asset2.key}
+    serialized = json.dumps(
+        (
+            25,
+            [key.to_user_string() for key in materialized_or_requested_root_asset_keys],
+            {
+                key.to_user_string(): subset.serialize()
+                for key, subset in materialized_or_requested_root_partitions_by_asset_key.items()
+            },
+        )
+    )
+
+    cursor = AssetReconciliationCursor.from_serialized(
+        serialized, asset_graph=AssetGraph.from_assets([asset1, asset2])
+    )
+    assert cursor.latest_storage_id == 25
+    assert (
+        cursor.materialized_or_requested_root_asset_keys
+        == materialized_or_requested_root_asset_keys
+    )
+    assert (
+        cursor.materialized_or_requested_root_partitions_by_asset_key
+        == materialized_or_requested_root_partitions_by_asset_key
+    )
