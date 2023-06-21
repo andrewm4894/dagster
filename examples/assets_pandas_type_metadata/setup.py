@@ -12,5 +12,5 @@ setup(
         "pandera",
         "pandas<2",  # See: https://github.com/dagster-io/dagster/issues/13339
     ],
-    extras_require={"dev": ["dagit", "pytest"]},
+    extras_require={"dev": ["dagster-webserver", "pytest"]},
 )
